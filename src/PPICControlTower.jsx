@@ -180,6 +180,7 @@ const ALERT_META = {
   needPenghabisan: { label: "NEED PENGHABISAN", color: "#EAB308", glow: "rgba(234,179,8,0.18)", desc: "Status stok gudang: Need Penghabisan \u2014 SKU kategori Discontinue, stok harus dihabiskan" },
   overStock: { label: "OVER STOCK", color: "#A78BFA", glow: "rgba(167,139,250,0.18)", desc: "Status stok gudang: Over Stock \u2014 pertimbangkan redistribusi" },
   noMovement: { label: "NO MOVEMENT", color: "#9CA3AF", glow: "rgba(156,163,175,0.18)", desc: "Status stok gudang: No Movement \u2014 kandidat dead stock" },
+  deadStock: { label: "DEAD STOCK", color: "#9CA3AF", glow: "rgba(156,163,175,0.18)", desc: "Status stok gudang: No Movement atau Discontinue \u2014 stok tidak lagi bergerak" },
 };
 const ALERT_ORDER = ["critical", "needRefill", "replenishment", "needPenghabisan", "overStock"];
 
@@ -198,6 +199,7 @@ const ALERT_PREDICATES = {
   needPenghabisan: (r) => !isCritical(r) && r.stockStatus === "Need Penghabisan",
   overStock: (r) => !isCritical(r) && r.stockStatus === "Over Stock",
   noMovement: (r) => !isCritical(r) && r.stockStatus === "No Movement",
+  deadStock: (r) => !isCritical(r) && (r.stockStatus === "No Movement" || r.stockStatus === "Discontinue"),
 };
 
 function fmtNum(n) {
@@ -458,6 +460,7 @@ export default function PPICControlTower() {
     { key: "productName", label: "Produk" },
     { key: "supplier", label: "Supplier" },
     { key: "stockWH", label: "Stok WH", num: true },
+    { key: "stockStatus", label: "Status Stok" },
     { key: "daysBeforeSO", label: "Hari s.d. SO", num: true },
     { key: "periode", label: "Periode" },
     { key: "status", label: "Status PO" },
@@ -563,16 +566,34 @@ export default function PPICControlTower() {
           { label: "SKU Dipantau", value: fmtNum(healthKpi.totalSKU), sub: `${period} \u00b7 ${area}` },
           { label: "Kondisi Sehat (Safe)", value: `${healthKpi.healthyPct}%`, sub: "dari SKU berstatus" },
           { label: "Item Kritis", value: fmtNum(healthKpi.critical), sub: "stok negatif / \u22643 hari", accent: "#EF4444" },
-          { label: "Dead Stock", value: fmtNum(healthKpi.dead), sub: "No Movement + Discontinue", accent: "#9CA3AF" },
-        ].map((c, i) => (
-          <div key={i} style={{ background: "#131C2E", border: "1px solid #1F2937", borderRadius: "10px", padding: "16px 18px" }}>
-            <div style={{ fontSize: "11px", color: "#8B96A8", marginBottom: "8px" }}>{c.label}</div>
-            <div style={{ fontSize: "26px", fontWeight: 700, fontVariantNumeric: "tabular-nums", fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace", color: c.accent || "#E8ECF1" }}>
-              {c.value}
-            </div>
-            <div style={{ fontSize: "11px", color: "#5B6579", marginTop: "4px" }}>{c.sub}</div>
-          </div>
-        ))}
+          { label: "Dead Stock", value: fmtNum(healthKpi.dead), sub: "No Movement + Discontinue", accent: "#9CA3AF", alertKey: "deadStock" },
+        ].map((c, i) => {
+          const active = c.alertKey && selectedAlert === c.alertKey;
+          const Tag = c.alertKey ? "button" : "div";
+          return (
+            <Tag
+              key={i}
+              onClick={c.alertKey ? () => setSelectedAlert(c.alertKey) : undefined}
+              title={c.alertKey ? "Klik untuk lihat detail item" : undefined}
+              style={{
+                textAlign: "left",
+                background: active ? "rgba(156,163,175,0.14)" : "#131C2E",
+                border: active ? "1px solid #9CA3AF" : "1px solid #1F2937",
+                borderRadius: "10px",
+                padding: "16px 18px",
+                cursor: c.alertKey ? "pointer" : "default",
+                fontFamily: "inherit",
+                width: "100%",
+              }}
+            >
+              <div style={{ fontSize: "11px", color: "#8B96A8", marginBottom: "8px" }}>{c.label}</div>
+              <div style={{ fontSize: "26px", fontWeight: 700, fontVariantNumeric: "tabular-nums", fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace", color: c.accent || "#E8ECF1" }}>
+                {c.value}
+              </div>
+              <div style={{ fontSize: "11px", color: "#5B6579", marginTop: "4px" }}>{c.sub}</div>
+            </Tag>
+          );
+        })}
       </div>
 
       {/* Alert strip */}

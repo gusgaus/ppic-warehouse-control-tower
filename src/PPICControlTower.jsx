@@ -176,20 +176,29 @@ const PO_STATUS_COLORS = {
 const ALERT_META = {
   critical: { label: "CRITICAL ITEMS", color: "#EF4444", glow: "rgba(239,68,68,0.18)", desc: "Stok gudang negatif atau sisa hari sebelum stockout \u2264 3 hari" },
   needRefill: { label: "NEED REFILL", color: "#F97316", glow: "rgba(249,115,22,0.18)", desc: "Status stok gudang: Need Refill" },
-  replenishment: { label: "REPLENISHMENT REQUIRED", color: "#EAB308", glow: "rgba(234,179,8,0.18)", desc: "Status stok gudang: Need Penghabisan" },
+  replenishment: { label: "REPLENISHMENT REQUIRED", color: "#22D3EE", glow: "rgba(34,211,238,0.18)", desc: "Status stok gudang: Safe atau Need Refill \u2014 kandidat yang perlu direncanakan replenishment" },
+  needPenghabisan: { label: "NEED PENGHABISAN", color: "#EAB308", glow: "rgba(234,179,8,0.18)", desc: "Status stok gudang: Need Penghabisan \u2014 SKU kategori Discontinue, stok harus dihabiskan" },
   overStock: { label: "OVER STOCK", color: "#A78BFA", glow: "rgba(167,139,250,0.18)", desc: "Status stok gudang: Over Stock \u2014 pertimbangkan redistribusi" },
   noMovement: { label: "NO MOVEMENT", color: "#9CA3AF", glow: "rgba(156,163,175,0.18)", desc: "Status stok gudang: No Movement \u2014 kandidat dead stock" },
 };
-const ALERT_ORDER = ["critical", "needRefill", "replenishment", "overStock", "noMovement"];
+const ALERT_ORDER = ["critical", "needRefill", "replenishment", "needPenghabisan", "overStock"];
 
-function categorize(r) {
-  if ((r.stockWH !== null && r.stockWH < 0) || (r.daysBeforeSO !== null && r.daysBeforeSO <= 3)) return "critical";
-  if (r.stockStatus === "Need Refill") return "needRefill";
-  if (r.stockStatus === "Need Penghabisan") return "replenishment";
-  if (r.stockStatus === "Over Stock") return "overStock";
-  if (r.stockStatus === "No Movement") return "noMovement";
-  return "other";
+function isCritical(r) {
+  return (r.stockWH !== null && r.stockWH < 0) || (r.daysBeforeSO !== null && r.daysBeforeSO <= 3);
 }
+
+// Each alert card has its own independent match rule -- "Replenishment
+// Required" intentionally overlaps with "Need Refill" (it's the broader
+// Safe + Need Refill watch-list), unlike the other cards which are mutually
+// exclusive by stock status.
+const ALERT_PREDICATES = {
+  critical: (r) => isCritical(r),
+  needRefill: (r) => !isCritical(r) && r.stockStatus === "Need Refill",
+  replenishment: (r) => !isCritical(r) && (r.stockStatus === "Safe" || r.stockStatus === "Need Refill"),
+  needPenghabisan: (r) => !isCritical(r) && r.stockStatus === "Need Penghabisan",
+  overStock: (r) => !isCritical(r) && r.stockStatus === "Over Stock",
+  noMovement: (r) => !isCritical(r) && r.stockStatus === "No Movement",
+};
 
 function fmtNum(n) {
   if (n === null || n === undefined || isNaN(n)) return "\u2014";
@@ -334,7 +343,7 @@ export default function PPICControlTower() {
   const healthKpi = useMemo(() => {
     const total = withKnownStatus.length;
     const safe = withKnownStatus.filter((r) => r.stockStatus === "Safe").length;
-    const critical = withKnownStatus.filter((r) => categorize(r) === "critical").length;
+    const critical = withKnownStatus.filter((r) => isCritical(r)).length;
     const dead = withKnownStatus.filter((r) => r.stockStatus === "No Movement" || r.stockStatus === "Discontinue").length;
     return {
       totalSKU: latestSnapshot.length,
@@ -345,10 +354,9 @@ export default function PPICControlTower() {
   }, [withKnownStatus, latestSnapshot]);
 
   const alertCounts = useMemo(() => {
-    const counts = { critical: 0, needRefill: 0, replenishment: 0, overStock: 0, noMovement: 0 };
-    withKnownStatus.forEach((r) => {
-      const c = categorize(r);
-      if (counts[c] !== undefined) counts[c] += 1;
+    const counts = {};
+    Object.keys(ALERT_PREDICATES).forEach((key) => {
+      counts[key] = withKnownStatus.filter(ALERT_PREDICATES[key]).length;
     });
     return counts;
   }, [withKnownStatus]);
@@ -413,7 +421,7 @@ export default function PPICControlTower() {
   }, [filteredRaw, poDelayRows]);
 
   const tableRows = useMemo(() => {
-    let r = withKnownStatus.filter((row) => categorize(row) === selectedAlert);
+    let r = withKnownStatus.filter(ALERT_PREDICATES[selectedAlert]);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       r = r.filter(

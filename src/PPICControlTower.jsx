@@ -54,6 +54,7 @@ const COL = {
   qtyReceived: 28,
   status: 31,
   remarks: 34,
+  requestDate: 26,
 };
 
 function parseCSV(text) {
@@ -147,6 +148,7 @@ function transformRows(csvRows) {
       qtyReceived: parseNum(r[COL.qtyReceived]),
       status: (r[COL.status] || "").trim() || null,
       remarks: (r[COL.remarks] || "").trim() || null,
+      requestDate: parseDateStr(r[COL.requestDate]),
     });
   }
   return out;
@@ -218,6 +220,23 @@ function daysBetween(a, b) {
   return Math.round((db - da) / 86400000);
 }
 
+// "Filter PR Status" -- derived label combining REQUEST DATE (col AA) with
+// Status PO (col AF). If REQUEST DATE is empty, the PR hasn't actually
+// started moving yet, regardless of what Status PO says.
+const PR_STATUS_MAP = {
+  "Close": "PO Received",
+  "Open": "Menunggu Pengiriman",
+  "Not yet Opened": "PO Not yet Opened",
+  "Close Partial": "Outstanding PO",
+  "Cancel": "PO Issue",
+};
+const PR_STATUS_OPTIONS = ["PO Received", "Menunggu Pengiriman", "PO Not yet Opened", "Outstanding PO", "PO Issue", "PR Not Running"];
+
+function prStatusLabel(r) {
+  if (!r.requestDate) return "PR Not Running";
+  return PR_STATUS_MAP[r.status] || r.status || "Unknown";
+}
+
 function downloadCSV(rows, columns, alertKey, period, area) {
   if (!rows.length) return;
   const escapeCell = (v) => {
@@ -226,7 +245,7 @@ function downloadCSV(rows, columns, alertKey, period, area) {
     return `"${s}"`;
   };
   const header = columns.map((c) => escapeCell(c.label)).join(",");
-  const lines = rows.map((row) => columns.map((c) => escapeCell(row[c.key])).join(","));
+  const lines = rows.map((row) => columns.map((c) => escapeCell(c.compute ? c.compute(row) : row[c.key])).join(","));
   const csv = [header, ...lines].join("\r\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -317,6 +336,7 @@ export default function PPICControlTower() {
 
   const [period, setPeriod] = useState("Semua Periode");
   const [area, setArea] = useState("Semua Area");
+  const [prStatusFilter, setPrStatusFilter] = useState("Semua PR Status");
   const [selectedAlert, setSelectedAlert] = useState("critical");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState(null);
@@ -324,9 +344,12 @@ export default function PPICControlTower() {
 
   const filteredRaw = useMemo(() => {
     return allRows.filter(
-      (r) => (period === "Semua Periode" || r.periode === period) && (area === "Semua Area" || r.area === area)
+      (r) =>
+        (period === "Semua Periode" || r.periode === period) &&
+        (area === "Semua Area" || r.area === area) &&
+        (prStatusFilter === "Semua PR Status" || prStatusLabel(r) === prStatusFilter)
     );
-  }, [allRows, period, area]);
+  }, [allRows, period, area, prStatusFilter]);
 
   const latestSnapshot = useMemo(() => {
     const map = new Map();
@@ -435,8 +458,8 @@ export default function PPICControlTower() {
     }
     if (sortKey) {
       r = [...r].sort((a, b) => {
-        const av = a[sortKey];
-        const bv = b[sortKey];
+        const av = sortKey === "prStatus" ? prStatusLabel(a) : a[sortKey];
+        const bv = sortKey === "prStatus" ? prStatusLabel(b) : b[sortKey];
         if (av === null || av === undefined) return 1;
         if (bv === null || bv === undefined) return -1;
         if (typeof av === "number" && typeof bv === "number") return sortDir === "asc" ? av - bv : bv - av;
@@ -464,6 +487,7 @@ export default function PPICControlTower() {
     { key: "daysBeforeSO", label: "Hari s.d. SO", num: true },
     { key: "periode", label: "Periode" },
     { key: "status", label: "Status PO" },
+    { key: "prStatus", label: "Filter PR Status", compute: (row) => prStatusLabel(row) },
   ];
 
   const totalPOStatus = Object.values(poStatusCounts).reduce((a, b) => a + b, 0) || 1;
@@ -539,17 +563,24 @@ export default function PPICControlTower() {
             <option key={a} value={a}>{a}</option>
           ))}
         </select>
+        <select value={prStatusFilter} onChange={(e) => setPrStatusFilter(e.target.value)} style={selectStyle}>
+          <option>Semua PR Status</option>
+          {PR_STATUS_OPTIONS.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
         <input
           placeholder="Cari produk / kode / supplier..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ ...selectStyle, width: "240px", marginLeft: "auto" }}
         />
-        {(period !== "Semua Periode" || area !== "Semua Area" || search) && (
+        {(period !== "Semua Periode" || area !== "Semua Area" || prStatusFilter !== "Semua PR Status" || search) && (
           <button
             onClick={() => {
               setPeriod("Semua Periode");
               setArea("Semua Area");
+              setPrStatusFilter("Semua PR Status");
               setSearch("");
             }}
             style={{ background: "none", border: "1px solid #2A3548", borderRadius: "6px", color: "#8B96A8", fontSize: "12px", padding: "7px 12px", cursor: "pointer" }}
@@ -752,7 +783,7 @@ export default function PPICControlTower() {
                         maxWidth: col.key === "productName" ? "220px" : "none",
                       }}
                     >
-                      {col.num ? fmtNum(row[col.key]) : row[col.key] || "\u2014"}
+                      {col.compute ? col.compute(row) : col.num ? fmtNum(row[col.key]) : row[col.key] || "\u2014"}
                     </td>
                   ))}
                 </tr>

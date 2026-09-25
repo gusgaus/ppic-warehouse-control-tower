@@ -233,9 +233,7 @@ function daysBetween(a, b) {
   return Math.round((db - da) / 86400000);
 }
 
-// "Filter PR Status" -- derived label combining REQUEST DATE (col AA) with
-// Status PO (col AF). If REQUEST DATE is empty, the PR hasn't actually
-// started moving yet, regardless of what Status PO says.
+// "Filter PR Status" -- derived label from Status PO (col AF).
 const PR_STATUS_MAP = {
   "Close": "PO Received",
   "Open": "Menunggu Pengiriman",
@@ -243,10 +241,9 @@ const PR_STATUS_MAP = {
   "Close Partial": "Outstanding PO",
   "Cancel": "PO Issue",
 };
-const PR_STATUS_OPTIONS = ["PO Received", "Menunggu Pengiriman", "PO Not yet Opened", "Outstanding PO", "PO Issue", "PR Not Running"];
+const PR_STATUS_OPTIONS = ["PO Received", "Menunggu Pengiriman", "PO Not yet Opened", "Outstanding PO", "PO Issue"];
 
 function prStatusLabel(r) {
-  if (!r.requestDate) return "PR Not Running";
   return PR_STATUS_MAP[r.status] || r.status || "Unknown";
 }
 

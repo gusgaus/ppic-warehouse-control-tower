@@ -183,6 +183,7 @@ const ALERT_META = {
   overStock: { label: "OVER STOCK", color: "#A78BFA", glow: "rgba(167,139,250,0.18)", desc: "Status stok gudang: Over Stock \u2014 pertimbangkan redistribusi" },
   noMovement: { label: "NO MOVEMENT", color: "#9CA3AF", glow: "rgba(156,163,175,0.18)", desc: "Status stok gudang: No Movement \u2014 kandidat dead stock" },
   deadStock: { label: "DEAD STOCK", color: "#9CA3AF", glow: "rgba(156,163,175,0.18)", desc: "Status stok gudang: No Movement atau Discontinue \u2014 stok tidak lagi bergerak" },
+  allFlagged: { label: "TOTAL PERLU AKSI", color: "#F87171", glow: "rgba(248,113,113,0.14)", desc: "Gabungan semua kategori: Critical, Need Refill, Replenishment Required, Need Penghabisan, Over Stock, dan Dead Stock" },
 };
 const ALERT_ORDER = ["critical", "needRefill", "replenishment", "needPenghabisan", "overStock"];
 
@@ -202,6 +203,18 @@ const ALERT_PREDICATES = {
   overStock: (r) => !isCritical(r) && r.stockStatus === "Over Stock",
   noMovement: (r) => !isCritical(r) && r.stockStatus === "No Movement",
   deadStock: (r) => !isCritical(r) && (r.stockStatus === "No Movement" || r.stockStatus === "Discontinue"),
+  // Union of every actionable category: Critical, Need Refill, Replenishment
+  // Required, Need Penghabisan, Over Stock, Dead Stock. Written out
+  // explicitly (rather than OR-ing the other predicates together) since this
+  // object can't reference its own sibling keys while being built.
+  allFlagged: (r) =>
+    isCritical(r) ||
+    r.stockStatus === "Safe" ||
+    r.stockStatus === "Need Refill" ||
+    r.stockStatus === "Need Penghabisan" ||
+    r.stockStatus === "Over Stock" ||
+    r.stockStatus === "No Movement" ||
+    r.stockStatus === "Discontinue",
 };
 
 function fmtNum(n) {
@@ -370,11 +383,13 @@ export default function PPICControlTower() {
     const safe = withKnownStatus.filter((r) => r.stockStatus === "Safe").length;
     const critical = withKnownStatus.filter((r) => isCritical(r)).length;
     const dead = withKnownStatus.filter((r) => r.stockStatus === "No Movement" || r.stockStatus === "Discontinue").length;
+    const allFlagged = withKnownStatus.filter(ALERT_PREDICATES.allFlagged).length;
     return {
       totalSKU: latestSnapshot.length,
       healthyPct: total ? Math.round((safe / total) * 1000) / 10 : 0,
       critical,
       dead,
+      allFlagged,
     };
   }, [withKnownStatus, latestSnapshot]);
 
@@ -596,11 +611,12 @@ export default function PPICControlTower() {
         {[
           { label: "SKU Dipantau", value: fmtNum(healthKpi.totalSKU), sub: `${period} \u00b7 ${area}` },
           { label: "Kondisi Sehat (Safe)", value: `${healthKpi.healthyPct}%`, sub: "dari SKU berstatus" },
-          { label: "Item Kritis", value: fmtNum(healthKpi.critical), sub: "stok negatif / \u22643 hari", accent: "#EF4444" },
+          { label: "Total Perlu Aksi", value: fmtNum(healthKpi.allFlagged), sub: "Critical+Refill+Replenish+Penghabisan+OverStock+Dead", accent: "#F87171", alertKey: "allFlagged" },
           { label: "Dead Stock", value: fmtNum(healthKpi.dead), sub: "No Movement + Discontinue", accent: "#9CA3AF", alertKey: "deadStock" },
         ].map((c, i) => {
           const active = c.alertKey && selectedAlert === c.alertKey;
           const Tag = c.alertKey ? "button" : "div";
+          const activeColor = c.accent || "#9CA3AF";
           return (
             <Tag
               key={i}
@@ -608,8 +624,8 @@ export default function PPICControlTower() {
               title={c.alertKey ? "Klik untuk lihat detail item" : undefined}
               style={{
                 textAlign: "left",
-                background: active ? "rgba(156,163,175,0.14)" : "#131C2E",
-                border: active ? "1px solid #9CA3AF" : "1px solid #1F2937",
+                background: active ? `${activeColor}22` : "#131C2E",
+                border: active ? `1px solid ${activeColor}` : "1px solid #1F2937",
                 borderRadius: "10px",
                 padding: "16px 18px",
                 cursor: c.alertKey ? "pointer" : "default",
